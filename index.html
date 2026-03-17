@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>足振り子マスター</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            font-family: 'Arial Black', 'Hiragino Kaku Gothic Pro', 'Meiryo', sans-serif;
+        }
+
+        .container { position: relative; width: 100%; height: 100%; overflow: hidden; }
+        video { display: none; }
+        canvas { width: 100vw; height: 100vh; object-fit: cover; transform: scaleX(-1); }
+
+        .ui-header {
+            position: absolute;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 96%;
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: flex-start;
+            z-index: 50;
+            pointer-events: none;
+        }
+
+        .info-box {
+            background: rgba(0,0,0,0.7);
+            padding: 8px 25px;
+            border-radius: 15px;
+            font-size: clamp(24px, 5vh, 60px); 
+            border: 3px solid;
+            font-weight: 900;
+            text-shadow: 2px 2px 10px rgba(0,0,0,1);
+            min-width: 220px;
+            text-align: center;
+        }
+        #score-display { color: #00ffcc; border-color: #00ffcc; }
+        #timer-display { color: #ff3366; border-color: #ff3366; }
+
+        #command-container {
+            position: absolute;
+            top: 55%; 
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 95%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            pointer-events: none;
+            z-index: 20;
+        }
+
+        #command-text {
+            font-size: 38vh; 
+            font-weight: 900;
+            color: #00ff00;
+            text-align: center;
+            line-height: 0.9;
+            white-space: nowrap;
+            letter-spacing: -0.06em;
+            text-shadow: 
+                12px 12px 0px #000, 
+                -12px -12px 0px #000, 
+                12px -12px 0px #000, 
+                -12px 12px 0px #000,
+                0 0 100px rgba(0,255,0,0.6);
+        }
+
+        .overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 100; color: white;
+        }
+        .overlay.preview-mode { background: rgba(0,0,0,0.3); }
+
+        .btn-start {
+            padding: 25px 60px;
+            font-size: 30px;
+            background: #ff0000;
+            color: white;
+            border: none;
+            border-radius: 60px;
+            cursor: pointer;
+            font-weight: bold;
+            box-shadow: 0 0 30px rgba(255,0,0,0.6);
+            pointer-events: auto;
+        }
+
+        #status-msg {
+            position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,255,0,0.85); color: #000; padding: 12px 30px;
+            border-radius: 40px; font-size: 30px; font-weight: bold; z-index: 60; display: none;
+        }
+
+        .text-shadow-bg {
+            background: rgba(0,0,0,0);
+            padding: 40px;
+            border-radius: 30px;
+            text-align: center;
+        }
+
+        .highlight { color: #00ff00; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <video id="input_video" playsinline></video>
+        <canvas id="output_canvas"></canvas>
+        <div id="status-msg">しせいをセットしました</div>
+
+        <div class="ui-header">
+            <div id="score-display" class="info-box">SCORE: <span id="val-score">0</span></div>
+            <div id="timer-display" class="info-box">TIME: <span id="val-timer">60</span></div>
+        </div>
+
+        <div id="command-container">
+            <div id="command-text"></div>
+        </div>
+
+        <div id="start-screen" class="overlay">
+            <div class="text-shadow-bg">
+                <h1 style="font-size: 60px; margin-bottom: 20px;">足振り子マスター</h1>
+                <button class="btn-start" onclick="initApp()">カメラを起動する</button>
+                <div id="setup-guide" style="margin-top:30px; font-size: 22px; line-height: 1.6;">
+                    全身が映る位置に立ってください。<br>
+                    <span class="highlight">「手をあげて」→「さげる」</span> で開始！
+                </div>
+            </div>
+        </div>
+
+        <div id="result-screen" class="overlay" style="display: none;">
+            <div class="text-shadow-bg">
+                <h1 id="result-title" style="font-size: 10vh; color: #ffcc00; margin-bottom: 10px;">TIME UP</h1>
+                <div style="font-size: 8vh; margin-bottom: 30px;">SCORE: <span id="final-score" style="color:#00ff00;">0</span></div>
+                <div>
+                    <span class="highlight" style="font-size: 32px;">もういちど？</span><br>
+                    <span style="font-size: 24px;">手をあげて戻すとスタート</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        
+        // 出題リストに「かかとあげ」を追加
+        const commands = ["ひだりまえ", "ひだりそと", "ひだりうしろ", "みぎまえ", "みぎそと", "みぎうしろ", "りょうあし", "ひだりうち", "みぎうち", "かかとあげ"];
+        let currentTarget = "";
+        let score = 0;
+        let timeLeft = 60;
+        let gameActive = false;
+        let waitingForNeutral = false; 
+        let isWaitingForReturn = false; 
+        let isProcessingSuccess = false; 
+        let timerInterval = null;
+        let appInitialized = false;
+        let lastEndTime = 0;
+
+        const START_COOLDOWN = 3000;  
+        const EXIT_HOLD_TIME = 4000;   
+        const LEG_THRESHOLD_RATIO = 0.82; 
+        
+        // --- 判定用しきい値 ---
+        const KNEE_LIFT_THRESHOLD = 0.07; 
+        const ANKLE_LIFT_THRESHOLD = 0.10; 
+        const KNEE_STAY_THRESHOLD = 0.05; 
+        const SIDE_STEP_THRESHOLD = 0.12; 
+        const MAX_ANKLE_LATERAL_LIMIT = 0.08; 
+
+        let initialHipAnkleDistL = 0;
+        let initialHipAnkleDistR = 0;
+        let initialKneeY_L = 0;
+        let initialKneeY_R = 0;
+        let initialAnkleY_L = 0;
+        let initialAnkleY_R = 0;
+
+        let handsUpStartTime = null; 
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const synth = window.speechSynthesis;
+
+        function playSound(freq, duration) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.frequency.value = freq;
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        function speak(text) {
+            synth.cancel();
+            const uttr = new SpeechSynthesisUtterance(text);
+            uttr.lang = 'ja-JP';
+            uttr.rate = 2.0; 
+            synth.speak(uttr);
+        }
+
+        function recordBasePosition(lm) {
+            initialHipAnkleDistL = Math.abs(lm[27].y - lm[23].y);
+            initialHipAnkleDistR = Math.abs(lm[28].y - lm[24].y);
+            initialHipZ_L = lm[23].z;
+            initialHipZ_R = lm[24].z;
+            
+            initialKneeY_L = lm[25].y;
+            initialKneeY_R = lm[26].y;
+            initialKneeZ_L = lm[25].z;
+            initialKneeZ_R = lm[26].z;
+            initialAnkleY_L = lm[27].y;
+            initialAnkleY_R = lm[28].y;
+            initialAnkleZ_L = lm[27].z;
+            initialAnkleZ_R = lm[28].z;
+
+            const msg = document.getElementById('status-msg');
+            msg.style.display = 'block';
+            setTimeout(() => msg.style.display = 'none', 1000);
+        }
+
+        function triggerRealStart(lm) {
+            recordBasePosition(lm);
+            waitingForNeutral = false;
+            gameActive = true;
+            isProcessingSuccess = false;
+            isWaitingForReturn = false;
+            score = 0;
+            timeLeft = 60;
+            document.getElementById('val-score').innerText = score;
+            document.getElementById('val-timer').innerText = timeLeft;
+            document.getElementById('start-screen').style.display = 'none';
+            document.getElementById('result-screen').style.display = 'none';
+            
+            playSound(880, 0.5);
+            nextCommand();
+
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                document.getElementById('val-timer').innerText = timeLeft;
+                if (timeLeft <= 0) endGame(false);
+            }, 1000);
+        }
+
+        function prepareStart() {
+            if (gameActive || waitingForNeutral) return;
+            waitingForNeutral = true;
+            const cmdEl = document.getElementById('command-text');
+            cmdEl.innerText = "手を下げてスタート";
+            cmdEl.style.fontSize = "25vh";
+            cmdEl.style.color = "#ff0";
+            playSound(660, 0.2);
+        }
+
+        function nextCommand() {
+            currentTarget = commands[Math.floor(Math.random() * commands.length)];
+            const cmdEl = document.getElementById('command-text');
+            cmdEl.innerText = currentTarget; 
+            cmdEl.style.fontSize = "38vh";
+            cmdEl.style.color = "#00ff00"; 
+            speak(currentTarget);
+        }
+
+        function endGame(isAborted = false) {
+            gameActive = false;
+            waitingForNeutral = false;
+            clearInterval(timerInterval);
+            lastEndTime = Date.now();
+            
+            const resScr = document.getElementById('result-screen');
+            resScr.style.display = 'flex';
+            resScr.classList.add('preview-mode');
+
+            document.getElementById('final-score').innerText = score;
+            document.getElementById('command-text').innerText = ""; 
+            
+            if (isAborted) {
+                document.getElementById('result-title').innerText = "QUIT GAME";
+                speak("ちゅうだんしました");
+            } else {
+                document.getElementById('result-title').innerText = "TIME UP";
+                speak("しゅうりょう。スコアは" + score + "てん");
+            }
+        }
+
+        function onResults(results) {
+            canvasElement.width = results.image.width;
+            canvasElement.height = results.image.height;
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            if (!gameActive) {
+                canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+                if (results.poseLandmarks) {
+                    drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: 'rgba(0,255,200,0.5)', lineWidth: 2});
+                }
+            } else {
+                canvasCtx.fillStyle = '#000';
+                canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+            }
+
+            if (results.poseLandmarks) {
+                const lm = results.poseLandmarks;
+                const nose = lm[0], lWrist = lm[15], rWrist = lm[16];
+                const lAnkle = lm[27], rAnkle = lm[28], lKnee = lm[25], rKnee = lm[26], lHip = lm[23], rHip = lm[24];
+
+                const currentMidHipX = (lHip.x + rHip.x) / 2;
+
+                const lHandUp = lWrist.y < nose.y;
+                const rHandUp = rWrist.y < nose.y;
+                const currentDistL = Math.abs(lAnkle.y - lHip.y);
+                const currentDistR = Math.abs(rAnkle.y - rHip.y);
+
+                if (!gameActive && !waitingForNeutral && (lHandUp || rHandUp)) {
+                    if (Date.now() - lastEndTime > START_COOLDOWN) {
+                        prepareStart();
+                    }
+                }
+                if (waitingForNeutral && !lHandUp && !rHandUp) {
+                    triggerRealStart(lm);
+                }
+
+                if (gameActive && (lHandUp || rHandUp)) {
+                    if (handsUpStartTime === null) handsUpStartTime = Date.now();
+                    else if (Date.now() - handsUpStartTime >= EXIT_HOLD_TIME) {
+                        endGame(true);
+                        handsUpStartTime = null;
+                        return;
+                    }
+                } else { handsUpStartTime = null; }
+
+                if (gameActive) {
+                    const cmdEl = document.getElementById('command-text');
+                    const isLFootBent = initialHipAnkleDistL > 0 && currentDistL < (initialHipAnkleDistL * LEG_THRESHOLD_RATIO);
+                    const isRFootBent = initialHipAnkleDistR > 0 && currentDistR < (initialHipAnkleDistR * LEG_THRESHOLD_RATIO);
+                    
+                    const isLKneeLifted = lKnee.y < (initialKneeY_L - KNEE_LIFT_THRESHOLD);
+                    const isRKneeLifted = rKnee.y < (initialKneeY_R - KNEE_LIFT_THRESHOLD);
+                    const isLKneeStatic = Math.abs(lKnee.y - initialKneeY_L) < KNEE_STAY_THRESHOLD;
+                    const isRKneeStatic = Math.abs(rKnee.y - initialKneeY_R) < KNEE_STAY_THRESHOLD;
+
+                    const isLAnkleLifted = lAnkle.y < (initialAnkleY_L - ANKLE_LIFT_THRESHOLD);
+                    const isRAnkleLifted = rAnkle.y < (initialAnkleY_R - ANKLE_LIFT_THRESHOLD);
+
+                    if (isWaitingForReturn) {
+                        if (!isLFootBent && !isRFootBent && isLKneeStatic && isRKneeStatic) {
+                            isWaitingForReturn = false;
+                            nextCommand();
+                        }
+                    } 
+                    else if (!isProcessingSuccess) {
+                        let success = false;
+                        const lAnkleOffset = lAnkle.x - currentMidHipX; 
+                        const rAnkleOffset = currentMidHipX - rAnkle.x;
+
+                        switch(currentTarget) {
+                            case "ひだりまえ": 
+                                if (lKnee.z > lAnkle.z && isLFootBent && isLKneeLifted && isLAnkleLifted && lAnkleOffset < MAX_ANKLE_LATERAL_LIMIT && !isRFootBent) success = true; 
+                                break;
+                            case "みぎまえ": 
+                                if (rKnee.z > rAnkle.z && isRFootBent && isRKneeLifted && isRAnkleLifted && rAnkleOffset < MAX_ANKLE_LATERAL_LIMIT && !isLFootBent) success = true; 
+                                break;
+                            case "ひだりうしろ": 
+                                if (lAnkle.z > initialAnkleZ_L + 0.3 && lKnee.z - lHip.z > initialKneeZ_L - initialHipZ_L + 0.1) success = true; 
+                                break;
+                            case "みぎうしろ": 
+                                if (rAnkle.z > initialAnkleZ_R + 0.3 && rKnee.z - rHip.z > initialKneeZ_R - initialHipZ_R + 0.1) success = true; 
+                                break;
+                            case "ひだりそと": 
+                                if (isLFootBent && lAnkleOffset > SIDE_STEP_THRESHOLD && !isRFootBent) success = true; 
+                                break;
+                            case "みぎそと": 
+                                if (isRFootBent && rAnkleOffset > SIDE_STEP_THRESHOLD && !isLFootBent) success = true; 
+                                break;
+                            case "りょうあし": 
+                                if (isLFootBent && isRFootBent) success = true; 
+                                break;
+                            case "ひだりうち": 
+                                if (lKnee.x < rKnee.x && lKnee.z < rKnee.z) success = true; 
+                                break;
+                            case "みぎうち": 
+                                if (lKnee.x < rKnee.x && lKnee.z > rKnee.z) success = true; 
+                                break;
+                            case "かかとあげ":
+                                // 基準：初期の足首から膝までの距離
+                                const shankDistL = Math.abs(initialAnkleY_L - initialKneeY_L);
+                                const shankDistR = Math.abs(initialAnkleY_R - initialKneeY_R);
+                                const heelThreshold = (shankDistL + shankDistR) / 2 / 12; // 1/12以上
+
+                                const isBothKneeRaised = (initialKneeY_L - lKnee.y) > heelThreshold && (initialKneeY_R - rKnee.y) > heelThreshold;
+                                const isKneesLevel = Math.abs(lKnee.y - rKnee.y) < 0.03; // 両膝のy軸位置がほぼ一致(3%以内)
+                                
+                                if (isBothKneeRaised && isKneesLevel) success = true;
+                                break;
+                        }
+
+                        if (success) {
+                            isProcessingSuccess = true; 
+                            score++;
+                            document.getElementById('val-score').innerText = score;
+                            playSound(1200, 0.2);
+                            cmdEl.innerText = "せいかい！";
+                            cmdEl.style.color = "#ff0000"; 
+                            setTimeout(() => {
+                                isProcessingSuccess = false;
+                                isWaitingForReturn = true;
+                                cmdEl.innerText = "もどして";
+                                cmdEl.style.color = "#ffff00";
+                                cmdEl.style.fontSize = "38vh";
+                            }, 450);
+                        }
+                    }
+                }
+            }
+            canvasCtx.restore();
+        }
+
+        const pose = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
+        pose.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+        pose.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => { await pose.send({image: videoElement}); },
+            width: 1280, height: 720
+        });
+
+        function initApp() {
+            if (appInitialized) return;
+            audioCtx.resume();
+            appInitialized = true;
+            document.querySelector('.btn-start').style.display = 'none';
+            camera.start().then(() => {
+                document.getElementById('start-screen').classList.add('preview-mode');
+            });
+        }
+    </script>
+</body>
+</html>
